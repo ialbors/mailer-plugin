@@ -221,6 +221,11 @@ public class Mailer extends Notifier {
          * If true use SSL on port 465 (standard SMTPS) unless <code>smtpPort</code> is set.
          */
         private boolean useSsl;
+        
+        /**
+         * If true use TLS
+         */
+        private boolean useTls;
 
         /**
          * The SMTP port to use for sending e-mail. Null for default to the environment,
@@ -232,6 +237,16 @@ public class Mailer extends Notifier {
          * The charset to use for the text and subject.
          */
         private String charset;
+        
+        /**
+         * SMTP timeout: Socket I/O timeout value in seconds.
+         */
+        private int timeout;
+        
+        /**
+         * SMTP connectionTimeout: Socket connection timeout value in seconds.
+         */
+        private int connectionTimeout;        
         
         /**
          * Used to keep track of number test e-mails.
@@ -267,9 +282,9 @@ public class Mailer extends Notifier {
 
         /** JavaMail session. */
         public Session createSession() {
-            return createSession(smtpHost,smtpPort,useSsl,smtpAuthUsername,smtpAuthPassword);
+            return createSession(smtpHost,smtpPort,useSsl, useTls, smtpAuthUsername,smtpAuthPassword, timeout, connectionTimeout);
         }
-        private static Session createSession(String smtpHost, String smtpPort, boolean useSsl, String smtpAuthUserName, Secret smtpAuthPassword) {
+        private static Session createSession(String smtpHost, String smtpPort, boolean useSsl, boolean useTls, String smtpAuthUserName, Secret smtpAuthPassword, int timeout, int connectionTimeout) {
             smtpPort = fixEmptyAndTrim(smtpPort);
             smtpAuthUserName = fixEmptyAndTrim(smtpAuthUserName);
 
@@ -296,12 +311,21 @@ public class Mailer extends Notifier {
             	}
 				props.put("mail.smtp.socketFactory.fallback", "false");
 			}
+            if(useTls){
+            	props.put("mail.smtp.starttls.enable", "true");
+            }
             if(smtpAuthUserName!=null)
                 props.put("mail.smtp.auth","true");
+            
+            props.put("mail.smtp.timeout", timeout*1000);
+            props.put("mail.smtp.connectiontimeout", connectionTimeout*1000);
+            
+            LOGGER.info("smtp.timeout=" + timeout*1000);
+            LOGGER.info("smtp.connectiontimeout=" + connectionTimeout*1000);
 
             // avoid hang by setting some timeout. 
-            props.put("mail.smtp.timeout","60000");
-            props.put("mail.smtp.connectiontimeout","60000");
+            //props.put("mail.smtp.timeout","60000");
+            //props.put("mail.smtp.connectiontimeout","60000");
 
             return Session.getInstance(props,getAuthenticator(smtpAuthUserName,Secret.toString(smtpAuthPassword)));
         }
@@ -334,7 +358,10 @@ public class Mailer extends Notifier {
             }
             smtpPort = nullify(json.getString("smtpPort"));
             useSsl = json.getBoolean("useSsl");
+            useTls = json.getBoolean("useTls");
             charset = json.getString("charset");
+            timeout = json.getInt("timeout");
+            connectionTimeout = json.getInt("connectionTimeout");
             if (charset == null || charset.length() == 0)
             	charset = "UTF-8";
             
@@ -380,6 +407,9 @@ public class Mailer extends Notifier {
         	return useSsl;
         }
 
+        public boolean getUseTls() {
+        	return useTls;
+        }
         public String getSmtpPort() {
         	return smtpPort;
         }
@@ -389,6 +419,14 @@ public class Mailer extends Notifier {
         	if (c == null || c.length() == 0)	c = "UTF-8";
         	return c;
         }
+        
+        public int getTimeout() {
+			return timeout;
+		}
+        
+        public int getConnectionTimeout() {
+			return connectionTimeout;
+		}
 
         public void setDefaultSuffix(String defaultSuffix) {
             this.defaultSuffix = defaultSuffix;
@@ -418,6 +456,10 @@ public class Mailer extends Notifier {
             this.useSsl = useSsl;
         }
 
+        public void setUseTls(boolean useTls) {
+            this.useTls = useTls;
+        }
+        
         public void setSmtpPort(String smtpPort) {
             this.smtpPort = smtpPort;
         }
@@ -481,12 +523,12 @@ public class Mailer extends Notifier {
         public FormValidation doSendTestMail(
                 @QueryParameter String smtpServer, @QueryParameter String adminAddress, @QueryParameter boolean useSMTPAuth,
                 @QueryParameter String smtpAuthUserName, @QueryParameter String smtpAuthPassword,
-                @QueryParameter boolean useSsl, @QueryParameter String smtpPort, @QueryParameter String charset,
+                @QueryParameter boolean useSsl, @QueryParameter boolean useTls, @QueryParameter String smtpPort, @QueryParameter String charset,
                 @QueryParameter String sendTestMailTo) throws IOException, ServletException, InterruptedException {
             try {
                 if (!useSMTPAuth)   smtpAuthUserName = smtpAuthPassword = null;
                 
-                MimeMessage msg = new MimeMessage(createSession(smtpServer,smtpPort,useSsl,smtpAuthUserName,Secret.fromString(smtpAuthPassword)));
+                MimeMessage msg = new MimeMessage(createSession(smtpServer,smtpPort,useSsl, useTls,smtpAuthUserName,Secret.fromString(smtpAuthPassword),timeout, connectionTimeout));
                 msg.setSubject(Messages.Mailer_TestMail_Subject(++testEmailCount), charset);
                 msg.setText(Messages.Mailer_TestMail_Content(testEmailCount, Jenkins.getInstance().getDisplayName()), charset);
                 msg.setFrom(StringToAddress(adminAddress, charset));
@@ -503,6 +545,14 @@ public class Mailer extends Notifier {
             }
         }
 
+        public FormValidation doCheckTimeout (@QueryParameter String value){
+        	return FormValidation.validateNonNegativeInteger(value);
+        }
+        
+        public FormValidation doCheckConnectionTimeout (@QueryParameter String value){
+        	return FormValidation.validateNonNegativeInteger(value);
+        }
+        
         public boolean isApplicable(Class<? extends AbstractProject> jobType) {
             return true;
         }
