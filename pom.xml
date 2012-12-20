@@ -81,8 +81,9 @@
     </dependency>
   </dependencies>
   <scm>
-    <connection>scm:git:https://github.com/jenkinsci/mailer-plugin.git</connection>
-    <developerConnection>scm:git:git@github.com:jenkinsci/mailer-plugin.git</developerConnection>
+    <connection>scm:git:ssh://github.com/ialbors/mailer-plugin.git</connection>
+    <developerConnection>scm:git:ssh://git@github.com/ialbors/mailer-plugin.git</developerConnection>
+    <url>https://github.com/ialbors/mailer-plugin.git</url>
   </scm>
   <repositories>
     <repository>
