@@ -31,6 +31,7 @@ import hudson.model.*;
 import hudson.scm.ChangeLogSet;
 import hudson.tasks.i18n.Messages;
 import jenkins.model.Jenkins;
+import jenkins.plugins.mailer.tasks.MailAddressFilter;
 
 import javax.mail.Address;
 import javax.mail.Message;
@@ -111,8 +112,11 @@ public class MailSender {
                 Address[] allRecipients = mail.getAllRecipients();
                 if (allRecipients != null) {
                     StringBuilder buf = new StringBuilder("Sending e-mails to:");
-                    for (Address a : allRecipients)
-                        buf.append(' ').append(a);
+                    for (Address a : allRecipients) {
+                        if (a!=null) {
+                            buf.append(' ').append(a);
+                        }
+                    }
                     listener.getLogger().println(buf);
                     Transport.send(mail);
 
@@ -275,7 +279,7 @@ public class MailSender {
                 // Careful with path separator between $1 and $2:
                 // workspaceDir will not normally end with one;
                 // workspaceDir.toURI() will end with '/' if and only if workspaceDir.exists() at time of call
-                wsPattern = Pattern.compile("(" +
+                wsPattern = ws == null ? null : Pattern.compile("(" +
                     Pattern.quote(ws.getRemote()) + "|" + Pattern.quote(ws.toURI().toString()) + ")[/\\\\]?([^:#\\s]*)");
             }
             for (String line : lines) {
@@ -366,7 +370,13 @@ public class MailSender {
 
             rcp.addAll(buildCulpritList(listener,culprits));
         }
-        msg.setRecipients(Message.RecipientType.TO, rcp.toArray(new InternetAddress[rcp.size()]));
+        
+        // set recipients after filtering out recipients that should not receive emails
+        Set<InternetAddress> filteredRecipients = MailAddressFilter.getFilteredRecipients(build, listener, rcp);
+        if (!filteredRecipients.isEmpty()) {
+            msg.setRecipients(Message.RecipientType.TO,
+                    filteredRecipients.toArray(new InternetAddress[filteredRecipients.size()]));
+        }
 
         AbstractBuild<?, ?> pb = build.getPreviousBuild();
         if(pb!=null) {
