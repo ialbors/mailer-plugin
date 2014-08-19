@@ -37,7 +37,7 @@ THE SOFTWARE.
         <f:entry title="${%User Name}" field="smtpAuthUserName">
           <f:textbox />
         </f:entry>
-        <f:entry title="${%Password}" field="smtpAuthPassword">
+        <f:entry title="${%Password}" field="smtpAuthPasswordSecret">
           <f:password />
         </f:entry>
       </f:optionalBlock>
@@ -68,7 +68,7 @@ THE SOFTWARE.
       <f:entry title="${%Test e-mail recipient}">
           <f:textbox name="sendTestMailTo"/>
       </f:entry>
-      <f:validateButton method="sendTestMail" title="${%Test configuration}" with="sendTestMailTo,smtpServer,adminAddress,useSMTPAuth,smtpAuthUserName,smtpAuthPassword,useSsl,useTls,smtpPort,charset" />
+      <f:validateButton method="sendTestMail" title="${%Test configuration}" with="sendTestMailTo,smtpServer,adminAddress,useSMTPAuth,smtpAuthUserName,smtpAuthPasswordSecret,useSsl,useTls,smtpPort,charset" />
     </f:optionalBlock>
   </f:section>
 </j:jelly>

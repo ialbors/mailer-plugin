@@ -369,7 +369,7 @@ public class Mailer extends Notifier {
             if(json.has("useSMTPAuth")) {
                 JSONObject auth = json.getJSONObject("useSMTPAuth");
                 smtpAuthUsername = nullify(auth.getString("smtpAuthUserName"));
-                smtpAuthPassword = Secret.fromString(nullify(auth.getString("smtpAuthPassword")));
+                smtpAuthPassword = Secret.fromString(nullify(auth.getString("smtpAuthPasswordSecret")));
             } else {
                 smtpAuthUsername = null;
                 smtpAuthPassword = null;
@@ -420,7 +420,11 @@ public class Mailer extends Notifier {
             if (smtpAuthPassword==null) return null;
             return Secret.toString(smtpAuthPassword);
         }
-        
+
+        public Secret getSmtpAuthPasswordSecret() {
+            return smtpAuthPassword;
+        }
+
         public boolean getUseSsl() {
         	return useSsl;
         }
@@ -538,13 +542,16 @@ public class Mailer extends Notifier {
          */
         public FormValidation doSendTestMail(
                 @QueryParameter String smtpServer, @QueryParameter String adminAddress, @QueryParameter boolean useSMTPAuth,
-                @QueryParameter String smtpAuthUserName, @QueryParameter String smtpAuthPassword,
+                @QueryParameter String smtpAuthUserName, @QueryParameter Secret smtpAuthPasswordSecret,
                 @QueryParameter boolean useSsl, @QueryParameter boolean useTls, @QueryParameter String smtpPort, @QueryParameter String charset,
                 @QueryParameter String sendTestMailTo) throws IOException, ServletException, InterruptedException {
             try {
-                if (!useSMTPAuth)   smtpAuthUserName = smtpAuthPassword = null;
+                if (!useSMTPAuth) {
+                    smtpAuthUserName = null;
+                    smtpAuthPasswordSecret = null;
+                }
                 
-                MimeMessage msg = new MimeMessage(createSession(smtpServer,smtpPort,useSsl, useTls,smtpAuthUserName,Secret.fromString(smtpAuthPassword),timeout, connectionTimeout));
+                MimeMessage msg = new MimeMessage(createSession(smtpServer, smtpPort, useSsl, useTls, smtpAuthUserName, smtpAuthPasswordSecret, timeout, connectionTimeout));
                 msg.setSubject(Messages.Mailer_TestMail_Subject(++testEmailCount), charset);
                 msg.setText(Messages.Mailer_TestMail_Content(testEmailCount, Jenkins.getInstance().getDisplayName()), charset);
                 msg.setFrom(StringToAddress(adminAddress, charset));
