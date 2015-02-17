@@ -29,6 +29,7 @@ import hudson.remoting.Base64;
 import hudson.tasks.Mailer;
 import jenkins.model.Jenkins;
 import jenkins.model.JenkinsLocationConfiguration;
+
 import org.apache.commons.lang.StringUtils;
 import org.jenkinsci.main.modules.instance_identity.InstanceIdentity;
 
@@ -39,10 +40,13 @@ import javax.mail.Message;
 import javax.mail.MessagingException;
 import javax.mail.Multipart;
 import javax.mail.internet.AddressException;
+import javax.mail.internet.HeaderTokenizer;
 import javax.mail.internet.InternetAddress;
 import javax.mail.internet.MimeBodyPart;
 import javax.mail.internet.MimeMessage;
 import javax.mail.internet.MimeMultipart;
+import javax.mail.internet.MimeUtility;
+
 import java.io.UnsupportedEncodingException;
 import java.security.interfaces.RSAPublicKey;
 import java.util.Date;
@@ -131,7 +135,7 @@ public class MimeMessageBuilder {
     }
 
     public MimeMessageBuilder addRecipients(@Nonnull String recipients, @Nonnull Message.RecipientType recipientType) throws UnsupportedEncodingException {
-        StringTokenizer tokens = new StringTokenizer(recipients);
+        StringTokenizer tokens = new StringTokenizer(recipients, " \t\n\r\f,");
         while (tokens.hasMoreTokens()) {
             String addressToken = tokens.nextToken();
             InternetAddress internetAddress = toNormalizedAddress(addressToken);
@@ -161,7 +165,7 @@ public class MimeMessageBuilder {
 
         setJenkinsInstanceIdent(msg);
 
-        msg.setContent("", mimeType);
+        msg.setContent("", contentType());
         if (StringUtils.isNotBlank(from)) {
             msg.setFrom(toNormalizedAddress(from));
         }
@@ -212,10 +216,14 @@ public class MimeMessageBuilder {
             Multipart multipart = new MimeMultipart();
             BodyPart bodyPart = new MimeBodyPart();
 
-            bodyPart.setContent(body, mimeType);
+            bodyPart.setContent(body, contentType());
             multipart.addBodyPart(bodyPart);
             msg.setContent(multipart);
         }
+    }
+
+    private String contentType() {
+        return String.format("%s; charset=%s", mimeType, MimeUtility.quote(charset, HeaderTokenizer.MIME));
     }
 
     private void addRecipients(MimeMessage msg) throws UnsupportedEncodingException, MessagingException {

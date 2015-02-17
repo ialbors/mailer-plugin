@@ -25,19 +25,24 @@ package jenkins.plugins.mailer.tasks;
 
 import hudson.tasks.Mailer;
 import jenkins.model.JenkinsLocationConfiguration;
+
 import org.apache.commons.codec.binary.Base64;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
+import org.jvnet.hudson.test.Issue;
 import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.mock_javamail.Mailbox;
+import org.kohsuke.stapler.framework.io.WriterOutputStream;
 
 import javax.mail.Address;
 import javax.mail.Message;
 import javax.mail.Transport;
 import javax.mail.internet.MimeMessage;
 import javax.mail.internet.MimeMultipart;
+
+import java.io.StringWriter;
 import java.security.KeyFactory;
 import java.security.PublicKey;
 import java.security.spec.X509EncodedKeySpec;
@@ -88,6 +93,43 @@ public class MimeMessageBuilderTest {
     }
 
     @Test
+    @Issue("JENKINS-26758")
+    public void test_charset_utf8() throws Exception {
+        MimeMessageBuilder messageBuilder = new MimeMessageBuilder();
+        messageBuilder.setMimeType("text/html");
+        messageBuilder.setBody("Synthèse");
+  
+        MimeMessage message = messageBuilder.buildMimeMessage();
+        message.saveChanges();
+
+        StringWriter sw = new StringWriter();
+        ((MimeMultipart)message.getContent()).getBodyPart(0).writeTo(new WriterOutputStream(sw));
+        Assert.assertEquals("Content-Type: text/html; charset=UTF-8\n"
+                + "Content-Transfer-Encoding: quoted-printable\n\n"
+                + "Synth=C3=A8se", 
+                sw.toString().replaceAll("\r\n?", "\n"));
+    }
+
+    @Test
+    @Issue("JENKINS-26758")
+    public void test_charset_iso_8859_1() throws Exception {
+        MimeMessageBuilder messageBuilder = new MimeMessageBuilder();
+        messageBuilder.setMimeType("text/html");
+        messageBuilder.setCharset("ISO-8859-1");
+        messageBuilder.setBody("Synthèse");
+  
+        MimeMessage message = messageBuilder.buildMimeMessage();
+        message.saveChanges();
+
+        StringWriter sw = new StringWriter();
+        ((MimeMultipart)message.getContent()).getBodyPart(0).writeTo(new WriterOutputStream(sw));
+        Assert.assertEquals("Content-Type: text/html; charset=ISO-8859-1\n"
+                + "Content-Transfer-Encoding: quoted-printable\n\n"
+                + "Synth=E8se", 
+                sw.toString().replaceAll("\r\n?", "\n"));
+    }
+
+    @Test
     public void test_send() throws Exception {
         MimeMessageBuilder messageBuilder = new MimeMessageBuilder();
 
@@ -106,5 +148,20 @@ public class MimeMessageBuilderTest {
         Message message = mailbox.get(0);
         Assert.assertEquals("Hello", message.getSubject());
         Assert.assertEquals("Testing email", ((MimeMultipart)message.getContent()).getBodyPart(0).getContent().toString());
+    }
+
+    @Test
+    @Issue("JENKINS-26606")
+    public void test_addRecipients_tokenizer() throws Exception {
+        MimeMessageBuilder messageBuilder = new MimeMessageBuilder();
+
+        messageBuilder.addRecipients("tom.xxxx@gmail.com,tom.yyyy@gmail.com tom.zzzz@gmail.com");
+        MimeMessage mimeMessage = messageBuilder.buildMimeMessage();
+
+        Address[] recipients = mimeMessage.getAllRecipients();
+        Assert.assertEquals(3, recipients.length);
+        Assert.assertEquals("tom.xxxx@gmail.com", recipients[0].toString());
+        Assert.assertEquals("tom.yyyy@gmail.com", recipients[1].toString());
+        Assert.assertEquals("tom.zzzz@gmail.com", recipients[2].toString());
     }
 }
