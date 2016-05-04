@@ -26,10 +26,15 @@ package hudson.tasks;
 import hudson.model.FreeStyleBuild;
 import hudson.model.FreeStyleProject;
 import hudson.tasks.Mailer.DescriptorImpl;
+import org.junit.Rule;
+import org.junit.Test;
 import org.jvnet.hudson.test.Bug;
 import org.jvnet.hudson.test.FailureBuilder;
-import org.jvnet.hudson.test.HudsonTestCase;
 import org.jvnet.hudson.test.Email;
+import org.jvnet.hudson.test.FakeChangeLogSCM;
+import org.jvnet.hudson.test.JenkinsRule;
+import org.jvnet.hudson.test.JenkinsRule.WebClient;
+import org.jvnet.hudson.test.UnstableBuilder;
 import org.jvnet.mock_javamail.Mailbox;
 
 import javax.mail.Address;
@@ -37,35 +42,66 @@ import javax.mail.internet.InternetAddress;
 
 import jenkins.model.JenkinsLocationConfiguration;
 
+import java.util.concurrent.atomic.AtomicLong;
+
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotSame;
+import static org.junit.Assert.assertNull;
+
 
 /**
  * @author Kohsuke Kawaguchi
  */
-public class MailerTest extends HudsonTestCase {
+public class MailerTest {
+    /** Default recipient used in tests. */
+    private static final String RECIPIENT = "you <you@sun.com>";
+    /** Fixed FAILURE builder. */
+    private static final Builder FAILURE = new FailureBuilder();
+    /** Fixed UNSTABLE builder. */
+    private static final Builder UNSTABLE = new UnstableBuilder();
+    /** Commit author 1. */
+    private static final String AUTHOR1 = "author1@example.com";
+    /** Commit author 2. */
+    private static final String AUTHOR2 = "author2@example.com";
+    /** Change counter. */
+    private static final AtomicLong COUNTER = new AtomicLong(0L);
+
+    @Rule
+    public JenkinsRule rule = new JenkinsRule();
+
+    private static Mailbox getMailbox(String recipient) throws Exception {
+        return Mailbox.get(new InternetAddress(recipient));
+    }
+
+    private static Mailbox getEmptyMailbox(String recipient) throws Exception {
+        Mailbox inbox = getMailbox(recipient);
+        inbox.clear();
+        return inbox;
+    }
+
+    private TestProject create(boolean notifyEveryUnstableBuild, boolean sendToIndividuals) throws Exception {
+        Mailer m = new Mailer(RECIPIENT, notifyEveryUnstableBuild, sendToIndividuals);
+        return new TestProject(m);
+    }
+
     @Bug(1566)
+    @Test
     public void testSenderAddress() throws Exception {
         // intentionally give the whole thin in a double quote
         JenkinsLocationConfiguration.get().setAdminAddress("\"me <me@sun.com>\"");
 
-        String recipient = "you <you@sun.com>";
-        Mailbox yourInbox = Mailbox.get(new InternetAddress(recipient));
-        yourInbox.clear();
-
         // create a project to simulate a build failure
-        FreeStyleProject project = createFreeStyleProject();
-        project.getBuildersList().add(new FailureBuilder());
-        Mailer m = new Mailer(recipient, false, false);
-        project.getPublishersList().add(m);
+        TestProject project = create(false, false).failure().buildAndCheck(1);
 
-        FreeStyleBuild b = project.scheduleBuild2(0).get();
-
-        assertEquals(getLog(b), 1, yourInbox.size());
+        // build it and check sender address
+        Mailbox yourInbox = getMailbox(RECIPIENT);
         Address[] senders = yourInbox.get(0).getFrom();
         assertEquals(1,senders.length);
         assertEquals("me <me@sun.com>",senders[0].toString());
     }
 
     @Email("http://www.nabble.com/email-recipients-disappear-from-freestyle-job-config-on-save-to25479293.html")
+    @Test
     public void testConfigRoundtrip() throws Exception {
         Mailer m = new Mailer("kk@kohsuke.org", false, true);
         verifyRoundtrip(m);
@@ -75,14 +111,15 @@ public class MailerTest extends HudsonTestCase {
     }
 
     private void verifyRoundtrip(Mailer before) throws Exception {
-        FreeStyleProject p = createFreeStyleProject();
+        FreeStyleProject p = rule.createFreeStyleProject();
         p.getPublishersList().add(before);
-        submit(new WebClient().getPage(p,"configure").getFormByName("config"));
+        rule.submit(rule.createWebClient().getPage(p,"configure").getFormByName("config"));
         Mailer after = p.getPublishersList().get(Mailer.class);
         assertNotSame(before,after);
-        assertEqualBeans(before,after,"recipients,dontNotifyEveryUnstableBuild,sendToIndividuals");
+        rule.assertEqualBeans(before,after,"recipients,dontNotifyEveryUnstableBuild,sendToIndividuals");
     }
 
+    @Test
     public void testGlobalConfigRoundtrip() throws Exception {
         DescriptorImpl d = Mailer.descriptor();
         JenkinsLocationConfiguration.get().setAdminAddress("admin@me");
@@ -93,7 +130,7 @@ public class MailerTest extends HudsonTestCase {
         d.setUseSsl(true);
         d.setSmtpAuth("user","pass");
 
-        submit(new WebClient().goTo("configure").getFormByName("config"));
+        rule.submit(rule.createWebClient().goTo("configure").getFormByName("config"));
 
         assertEquals("admin@me", JenkinsLocationConfiguration.get().getAdminAddress());
         assertEquals("default-suffix",d.getDefaultSuffix());
@@ -106,7 +143,7 @@ public class MailerTest extends HudsonTestCase {
 
         d.setUseSsl(false);
         d.setSmtpAuth(null,null);
-        submit(new WebClient().goTo("configure").getFormByName("config"));
+        rule.submit(rule.createWebClient().goTo("configure").getFormByName("config"));
         assertEquals(false,d.getUseSsl());
         assertNull("expected null, got: " + d.getSmtpAuthUserName(), d.getSmtpAuthUserName());
         assertNull("expected null, got: " + d.getSmtpAuthPassword(), d.getSmtpAuthPassword());
@@ -126,17 +163,146 @@ public class MailerTest extends HudsonTestCase {
     /**
      * Test {@link JenkinsLocationConfiguration} can load hudsonUrl.
      */
+    @Test
     public void testHudsonUrlCompatibility() throws Exception {
         // not configured.
         assertNull(new CleanJenkinsLocationConfiguration().getUrl());
         
         Mailer m = new Mailer("", true, false);
-        FreeStyleProject p = createFreeStyleProject();
+        FreeStyleProject p = rule.createFreeStyleProject();
         p.getPublishersList().add(m);
-        WebClient wc = new WebClient();
-        submit(wc.getPage(p,"configure").getFormByName("config"));
+        WebClient wc = rule.createWebClient();
+        rule.submit(wc.getPage(p,"configure").getFormByName("config"));
         
         // configured via the marshaled XML file of Mailer
         assertEquals(wc.getContextPath(), new CleanJenkinsLocationConfiguration().getUrl());
     }
+
+    @Test
+    public void testNotifyEveryUnstableBuild() throws Exception {
+        create(true, false).failure()
+            .buildAndCheck(1)
+            .buildAndCheck(1)
+            .unstable()
+            .buildAndCheck(1)
+            .buildAndCheck(1)
+            .success()
+            .buildAndCheck(1) /* back to normal mail. */
+            .buildAndCheck(0)
+            .unstable()
+            .buildAndCheck(1)
+            .failure()
+            .buildAndCheck(1);
+    }
+
+    @Test
+    public void testNotNotifyEveryUnstableBuild() throws Exception {
+        create(false, false)
+            .buildAndCheck(0)
+            .buildAndCheck(0)
+            .unstable()
+            .buildAndCheck(1)
+            .buildAndCheck(0)
+            .success()
+            .buildAndCheck(1) /* back to normal mail. */
+            .buildAndCheck(0)
+            .unstable()
+            .buildAndCheck(1)
+            .buildAndCheck(0)
+            .failure()
+            .buildAndCheck(1)
+            .buildAndCheck(1);
+    }
+
+    @Test
+    public void testNotifyCulprits() throws Exception {
+        TestProject project = create(true, true).buildAndCheck(0);
+        // Changes with no problems
+        project.commit(AUTHOR1).clearBuild().check(0, 0, 0);
+        // Commit causes build to be unstable
+        project.commit(AUTHOR1).unstable().clearBuild().check(1, 1, 0);
+        // Another one
+        project.commit(AUTHOR2).clearBuild().check(1, 1, 1);
+        // Back to normal
+        project.commit(AUTHOR1).success().clearBuild().check(1, 1, 1);
+        // Now a failure
+        project.commit(AUTHOR2).failure().clearBuild().check(1, 0, 1);
+    }
+
+    private final class TestProject {
+        private final FakeChangeLogSCM scm = new FakeChangeLogSCM();
+        private final FreeStyleProject project;
+
+        TestProject(Mailer m) throws Exception {
+            project = rule.createFreeStyleProject();
+            project.setScm(scm);
+            project.getPublishersList().add(m);
+        }
+
+        TestProject changeStatus(Builder status) {
+            project.getBuildersList().clear();
+            if (status != null) {
+                project.getBuildersList().add(status);
+            }
+            return this;
+        }
+
+        TestProject success() {
+            return changeStatus(null);
+        }
+
+        TestProject failure() {
+            return changeStatus(FAILURE);
+        }
+
+        TestProject unstable() {
+            return changeStatus(UNSTABLE);
+        }
+
+        TestProject commit(String author) {
+            scm.addChange().withAuthor(author).withMsg("commit #" + COUNTER.incrementAndGet());
+            return this;
+        }
+
+        TestBuild build(String... mailboxesToClear) throws Exception {
+            for (String recipient : mailboxesToClear) {
+                getEmptyMailbox(recipient);
+            }
+            return new TestBuild(project.scheduleBuild2(0).get());
+        }
+
+        TestBuild clearBuild() throws Exception {
+            return build(RECIPIENT, AUTHOR1, AUTHOR2);
+        }
+
+        TestProject buildAndCheck(int expectedSize, String recipient) throws Exception {
+            build(recipient).check(expectedSize, recipient);
+            return this;
+        }
+
+        TestProject buildAndCheck(int expectedSize) throws Exception {
+            return buildAndCheck(expectedSize, RECIPIENT);
+        }
+    }
+
+    private final class TestBuild {
+        private final FreeStyleBuild build;
+        private final String log;
+
+        TestBuild(FreeStyleBuild build) throws Exception {
+            this.build = build;
+            this.log = rule.getLog(build);
+        }
+
+        TestBuild check(int expectedSize, String recipient) throws Exception {
+            final Mailbox inbox = getMailbox(recipient);
+            assertEquals(log, expectedSize, inbox.size());
+            return this;
+        }
+
+        TestBuild check(int expectedRecipient, int expectedAuthor1, int expectedAuthor2) throws Exception {
+            return check(expectedRecipient, RECIPIENT).check(expectedAuthor1, AUTHOR1).check(expectedAuthor2, AUTHOR2);
+        }
+    }
+
 }
