@@ -52,6 +52,8 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import javax.annotation.CheckForNull;
 import javax.annotation.Nonnull;
+import org.acegisecurity.Authentication;
+import org.acegisecurity.userdetails.UsernameNotFoundException;
 
 /**
  * Core logic of sending out notification e-mail.
@@ -200,8 +202,12 @@ public class MailSender {
 
     private MimeMessage createBackToNormalMail(Run<?, ?> build, String subject, TaskListener listener) throws MessagingException, UnsupportedEncodingException {
         MimeMessage msg = createEmptyMail(build, listener);
+
         msg.setSubject(getSubject(build, Messages.MailSender_BackToNormalMail_Subject(subject)),charset);
-        msg.setText(DisplayURLProvider.get().getRunURL(build),charset);
+        StringBuilder buf = new StringBuilder();
+        appendBuildUrl(build, buf);
+        msg.setText(buf.toString(),charset);
+
         return msg;
     }
 
@@ -230,17 +236,30 @@ public class MailSender {
             }
         }
 
-        msg.setSubject(getSubject(build, subject),charset);
+        msg.setSubject(getSubject(build, subject), charset);
+        StringBuilder buf = new StringBuilder();
         DisplayURLProvider displayURLProvider = DisplayURLProvider.get();
         // Link to project changes summary for "still unstable" if this or last build has changes
-        String url;
-        if (still && !(getChangeSet(build).isEmptySet() && getChangeSet(prev).isEmptySet()))
-            url = displayURLProvider.getChangesURL(build);
-        else
-            url = displayURLProvider.getRunURL(build);
-        msg.setText(url, charset);
+        if (still && !(getChangeSet(build).isEmptySet() && getChangeSet(prev).isEmptySet())) {
+            appendUrl(displayURLProvider.getChangesURL(build), buf);
+        } else {
+            appendBuildUrl(build, buf);
+        }
+        msg.setText(buf.toString(), charset);
 
         return msg;
+    }
+
+    private void appendBuildUrl(Run<?, ?> build, StringBuilder buf) {
+        if (getChangeSet(build).isEmptySet()) {
+            appendUrl(DisplayURLProvider.get().getRunURL(build), buf);
+        } else {
+            appendUrl(DisplayURLProvider.get().getChangesURL(build), buf);
+        }
+    }
+
+    private void appendUrl(String url, StringBuilder buf) {
+        buf.append(Messages.MailSender_Link(url)).append("\n\n");
     }
 
     private MimeMessage createFailureMail(Run<?, ?> build, TaskListener listener) throws MessagingException, UnsupportedEncodingException, InterruptedException {
@@ -249,7 +268,7 @@ public class MailSender {
         msg.setSubject(getSubject(build, Messages.MailSender_FailureMail_Subject()),charset);
 
         StringBuilder buf = new StringBuilder();
-        buf.append(DisplayURLProvider.get().getRunURL(build));
+        appendBuildUrl(build, buf);
 
         boolean firstChange = true;
         for (ChangeLogSet.Entry entry : getChangeSet(build)) {
@@ -367,11 +386,7 @@ public class MailSender {
                 messageBuilder.addRecipients(getCulpritsOfEmailList(project, build, listener));
             }
             if (sendToIndividuals) {
-                Set<User> culprits = build.getCulprits();
-                if(debug) {
-                    listener.getLogger().println("Trying to send e-mails to individuals who broke the run. sizeof(culprits)==" + culprits.size());
-                }
-                messageBuilder.addRecipients(getUserEmailList(listener, culprits));
+                messageBuilder.addRecipients(getUserEmailList(listener, build));
             }
         }
         
@@ -419,7 +434,7 @@ public class MailSender {
         do {
             b = b.getNextBuild();
             if (b != null) {
-                String userEmails = getUserEmailList(listener, b.getCulprits());
+                String userEmails = getUserEmailList(listener, b);
                 if (culpritEmails.length() > 0) {
                     culpritEmails.append(",");
                 }
@@ -430,14 +445,40 @@ public class MailSender {
         return culpritEmails.toString();
     }
 
+    /** If set, send to known users who lack {@link Item#READ} access to the job. */
+    static /* not final */ boolean SEND_TO_USERS_WITHOUT_READ = Boolean.getBoolean(MailSender.class.getName() + ".SEND_TO_USERS_WITHOUT_READ");
+    /** If set, send to unknown users. */
+    static /* not final */ boolean SEND_TO_UNKNOWN_USERS = Boolean.getBoolean(MailSender.class.getName() + ".SEND_TO_UNKNOWN_USERS");
+
     @Nonnull
-    private String getUserEmailList(TaskListener listener, Set<User> users) throws AddressException, UnsupportedEncodingException {
+    String getUserEmailList(TaskListener listener, AbstractBuild<?, ?> build) throws AddressException, UnsupportedEncodingException {
+        Set<User> users = build.getCulprits();
         StringBuilder userEmails = new StringBuilder();
         for (User a : users) {
             String adrs = Util.fixEmpty(a.getProperty(Mailer.UserProperty.class).getAddress());
             if(debug)
                 listener.getLogger().println("  User "+a.getId()+" -> "+adrs);
             if (adrs != null) {
+                if (Jenkins.getActiveInstance().isUseSecurity()) {
+                    try {
+                        Authentication auth = a.impersonate();
+                        if (!build.getACL().hasPermission(auth, Item.READ)) {
+                            if (SEND_TO_USERS_WITHOUT_READ) {
+                                listener.getLogger().println(Messages.MailSender_warning_user_without_read(adrs, build.getFullDisplayName()));
+                            } else {
+                                listener.getLogger().println(Messages.MailSender_user_without_read(adrs, build.getFullDisplayName()));
+                                continue;
+                            }
+                        }
+                    } catch (UsernameNotFoundException x) {
+                        if (SEND_TO_UNKNOWN_USERS) {
+                            listener.getLogger().println(Messages.MailSender_warning_unknown_user(adrs));
+                        } else {
+                            listener.getLogger().println(Messages.MailSender_unknown_user(adrs));
+                            continue;
+                        }
+                    }
+                }
                 if (userEmails.length() > 0) {
                     userEmails.append(",");
                 }
