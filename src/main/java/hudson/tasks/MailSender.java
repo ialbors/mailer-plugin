@@ -291,7 +291,7 @@ public class MailSender {
             buf.append('\n');
         }
 
-        buf.append("------------------------------------------\n");
+        buf.append("\n------------------------------------------\n");
 
         try {
             // Restrict max log size to avoid sending enormous logs over email.
@@ -406,6 +406,8 @@ public class MailSender {
         
         final Result result = run.getResult();
         msg.addHeader("X-Jenkins-Result", result != null ? result.toString() : "in progress");
+        // http://www.faqs.org/rfcs/rfc3834.html
+        msg.addHeader("Auto-submitted", "auto-generated");
 
         Run<?, ?> pb = run.getPreviousBuild();
         if(pb!=null) {
