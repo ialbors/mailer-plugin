@@ -358,7 +358,7 @@ public class Mailer extends Notifier implements SimpleBuildStep {
          * @return mail session based on the underlying session parameters.
          */
         public Session createSession() {
-            return createSession(smtpHost,smtpPort,useSsl, useTls, smtpAuthUsername,smtpAuthPassword, timeout, connectionTimeout);
+            return createSession(smtpHost,smtpPort,useSsl, useTls,getSmtpAuthUserName(),getSmtpAuthPasswordSecret(), timeout, connectionTimeout);
         }
         private static Session createSession(String smtpHost, String smtpPort, boolean useSsl, boolean useTls, String smtpAuthUserName, Secret smtpAuthPassword, int timeout, int connectionTimeout) {
             smtpPort = fixEmptyAndTrim(smtpPort);
@@ -511,7 +511,8 @@ public class Mailer extends Notifier implements SimpleBuildStep {
         }
 
         public Secret getSmtpAuthPasswordSecret() {
-            return smtpAuthPassword;
+            if (authentication == null) return null;
+            return authentication.getPassword();
         }
 
         public boolean getUseSsl() {
